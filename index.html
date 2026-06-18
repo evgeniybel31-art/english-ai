@@ -568,52 +568,73 @@ function checkStreak() {
 }
 
 // ═══════════════════════════════════════════════
-// PRONUNCIATION — Amazon Polly Joanna (женский)
-// ВАЖНО: speak() должна быть синхронной для iOS
+// PRONUNCIATION — Amazon Polly Joanna везде
+// iOS блокирует Audio без жеста — разблокируем
+// при первом касании экрана
 // ═══════════════════════════════════════════════
 let _audio = null;
+let _audioReady = false; // разблокирован ли Audio на iOS
 
+// Тихий MP3 для разблокировки iOS Audio
+const SILENT = 'data:audio/mpeg;base64,SUQzBAAAAAAA'
+  + 'AVQAAAAAAAAAAP/zgxAAAANIAUgAAAP/4yxAAAANIAUgAAAP/4'
+  + 'yxAAAANIAUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+function _unlockAudio() {
+  if (_audioReady) return;
+  const s = new Audio(SILENT);
+  s.volume = 0.001;
+  s.play().then(() => { _audioReady = true; }).catch(() => { _audioReady = true; });
+}
+
+// Разблокируем при первом касании экрана
+document.addEventListener('touchstart', _unlockAudio, { once: true });
+document.addEventListener('click', _unlockAudio, { once: true });
+
+// Amazon Polly Joanna — основная функция
 function speak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
-
   if (_audio) { try{_audio.pause();}catch(e){} _audio = null; }
   if (window.speechSynthesis) speechSynthesis.cancel();
 
-  // Синхронный вызов play() — iOS требует этого в обработчике жеста
   const url = `https://api.streamelements.com/kappa/v2/speech?voice=Joanna&text=${encodeURIComponent(clean)}`;
   _audio = new Audio(url);
-  _audio.play().catch(() => _wsSpeakFemale(clean));
+  _audio.play().catch(() => _wsFemale(clean));
 }
 
-// Web Speech API с приоритетом женских голосов (запасной)
-function _wsSpeakFemale(text) {
+// Запасной: Web Speech с поиском женского голоса
+function _wsFemale(text) {
   if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.15;
+  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.2;
   const vs = speechSynthesis.getVoices();
-  const names = ['Samantha','Karen','Moira','Tessa','Google UK English Female','Microsoft Zira'];
-  const v = names.map(n=>vs.find(x=>x.name===n)).find(Boolean)
-         || vs.find(v=>/female/i.test(v.name) && v.lang.startsWith('en'))
-         || vs.find(v=>v.lang==='en-GB')
-         || vs.find(v=>v.lang.startsWith('en'));
+  const pref = ['Samantha','Karen','Moira','Tessa','Google UK English Female','Microsoft Zira'];
+  const v = pref.map(n => vs.find(x => x.name === n)).find(Boolean)
+         || vs.find(v => /female/i.test(v.name) && v.lang.startsWith('en'))
+         || vs.find(v => v.lang === 'en-GB')
+         || vs.find(v => v.lang.startsWith('en'));
   if (v) u.voice = v;
   speechSynthesis.speak(u);
 }
 
-// Автоозвучка нового сообщения AI (Web Speech работает без жеста после первого взаимодействия)
+// Автоозвучка AI ответа
+// Если Audio разблокирован — Joanna, иначе Web Speech
 function autoSpeak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
-  // Пульсируем кнопку чтобы было понятно
+  // Подсвечиваем кнопку
   setTimeout(() => {
     const btns = document.querySelectorAll('.speak-msg');
     const last = btns[btns.length - 1];
-    if (last) { last.style.boxShadow = '0 0 0 3px var(--accent)'; setTimeout(()=>last.style.boxShadow='',2000); }
-  }, 200);
-  // Пробуем Web Speech API для автоозвучки
-  _wsSpeakFemale(clean);
+    if (last) { last.style.boxShadow = '0 0 0 3px var(--accent)'; setTimeout(() => last.style.boxShadow = '', 2500); }
+  }, 300);
+  if (_audioReady) {
+    speak(text); // Joanna — стабильный женский
+  } else {
+    _wsFemale(clean); // Web Speech пока не разблокировано
+  }
 }
 
 // ═══════════════════════════════════════════════
