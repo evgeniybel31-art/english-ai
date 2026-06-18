@@ -984,13 +984,19 @@ async function sendChat() {
 
   const sysPrompt = `You are Emma, a friendly English teacher for Russian beginners.
 Student knows: ${learned.join(', ') || 'hello, yes, no, please, thank you'}.
-RULES:
-1. Use ONLY words the student knows + (is,are,am,the,a,an,I,you,he,she,it,we,my,your,and,not,do,can,very,in,on,to,for,have)
+
+CRITICAL RULES — follow EXACTLY:
+1. Use ONLY words the student knows + basic grammar words (is,are,am,the,a,an,I,you,he,she,it,we,my,your,and,not,do,can,very,in,on,to,for,have)
 2. Short sentences only (max 8 words)
-3. ALWAYS reply in this exact format — two lines, no exceptions:
-ENG: [English text with emoji]
-RUS: [Russian translation]
-4. Correct errors kindly. Ask one question. Be warm.`;
+3. YOUR RESPONSE MUST BE EXACTLY TWO LINES — NO MORE, NO LESS:
+Line 1: ENG: [your English reply with one emoji]
+Line 2: RUS: [Russian translation of line 1 only]
+4. Do NOT write anything else. No explanations. No extra lines.
+5. Correct errors kindly. Ask one short question.
+
+Example of correct response:
+ENG: I am good! 😊 How are you today?
+RUS: Я хорошо! Как ты сегодня?`;
 
   // Build conversation history for Gemini
   const history = S.chat.slice(-10).map(m => ({
@@ -1053,11 +1059,23 @@ RUS: [Russian translation]
       const ruM = reply.match(/RUSSIAN:\s*(.+?)$/is);
       if (enM && ruM) { en = enM[1].trim(); ru = ruM[1].trim(); }
       else {
-        // fallback 2: parentheses (Привет!)
-        const par = reply.match(/\(([^\)]{2,})\)/);
-        en = reply.replace(/\([^\)]+\)/g,'').replace(/ENG:|RUS:/g,'').trim();
-        ru = par ? par[1].trim() : '';
+        // fallback 2: detect Cyrillic boundary — split English from Russian
+        const cyrIdx = reply.search(/[Ѐ-ӿ]/);
+        if (cyrIdx > 0) {
+          en = reply.slice(0, cyrIdx).replace(/ENG:|RUS:/g,'').trim().replace(/[.!?]\s*$/, m => m) ;
+          ru = reply.slice(cyrIdx).replace(/RUS:/g,'').trim();
+        } else {
+          // fallback 3: no Russian found, use full reply as English
+          en = reply.replace(/ENG:|RUS:/g,'').trim();
+          ru = '';
+        }
       }
+    }
+    // Safety: if en still contains Cyrillic, strip it
+    if (/[Ѐ-ӿ]/.test(en)) {
+      const ci = en.search(/[Ѐ-ӿ]/);
+      if (!ru) ru = en.slice(ci).trim();
+      en = en.slice(0, ci).trim();
     }
 
     addMsg('ai', en, ru);
