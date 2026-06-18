@@ -375,17 +375,18 @@ body {
   </div>
   <div id="chat-setup" style="display:none">
     <div class="api-box">
-      <div class="ico">🤖</div>
+      <div class="ico">⚡</div>
       <h3>Бесплатный AI учитель</h3>
-      <p>Используем <strong style="color:var(--green)">Google Gemini</strong> — полностью бесплатно, 1500 сообщений в день. Получите ключ за 1 минуту.</p>
-      <div style="background:var(--card2);border-radius:12px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.7;text-align:left">
-        1. Откройте <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com/app/apikey</a><br>
-        2. Нажмите <b>«Create API key»</b><br>
-        3. Скопируйте ключ и вставьте ниже
+      <p>Используем <strong style="color:var(--green)">Groq</strong> — бесплатно, молниеносно, 14 400 сообщений в день. Ключ за 1 минуту.</p>
+      <div style="background:var(--card2);border-radius:12px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.8;text-align:left">
+        1. Откройте <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a><br>
+        2. Войдите через Google / GitHub<br>
+        3. Нажмите <b>«Create API Key»</b><br>
+        4. Скопируйте и вставьте ниже
       </div>
-      <input class="api-in" type="password" id="api-inp" placeholder="AIza...">
+      <input class="api-in" type="password" id="api-inp" placeholder="gsk_...">
       <button class="api-save" onclick="saveKey()">Начать бесплатно →</button>
-      <p style="font-size:11px;color:var(--green);margin-top:10px">✅ Бесплатно • Без карты • 1500 сообщений/день</p>
+      <p style="font-size:11px;color:var(--green);margin-top:10px">✅ Бесплатно • Без карты • 14 400 сообщений/день</p>
     </div>
   </div>
   <div id="chat-main" style="display:none">
@@ -932,29 +933,39 @@ STRICT RULES:
     parts: [{ text: m.text }]
   }));
 
+  // Build messages for Groq (OpenAI-compatible format)
+  const messages = [
+    { role: 'system', content: sysPrompt },
+    ...S.chat.slice(-10).map(m => ({
+      role: m.role === 'ai' ? 'assistant' : 'user',
+      content: m.text
+    }))
+  ];
+
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${S.apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: sysPrompt }] },
-          contents: history,
-          generationConfig: { maxOutputTokens: 200, temperature: 0.7 }
-        })
-      }
-    );
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${S.apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages,
+        max_tokens: 200,
+        temperature: 0.7
+      })
+    });
 
     document.getElementById(lid)?.remove();
 
     if (!res.ok) {
       const e = await res.json();
       const msg = e.error?.message || 'Проверьте API ключ';
-      if (msg.includes('API_KEY_INVALID') || res.status === 400) {
-        addMsg('ai', '🔑 Неверный API ключ. Нажмите кнопку ниже и получите новый.');
-        document.getElementById('chat-main').innerHTML +=
-          `<button class="api-save" style="margin-top:10px" onclick="S.apiKey='';save();initChat()">🔄 Сменить ключ</button>`;
+      if (res.status === 401) {
+        addMsg('ai', '🔑 Неверный ключ. Получите новый на console.groq.com/keys');
+        document.getElementById('chat-main').insertAdjacentHTML('beforeend',
+          `<button class="api-save" style="margin-top:10px" onclick="S.apiKey='';save();initChat()">🔄 Сменить ключ</button>`);
       } else {
         addMsg('ai', '⚠️ Ошибка: ' + msg);
       }
@@ -962,7 +973,7 @@ STRICT RULES:
     }
 
     const d = await res.json();
-    const reply = d.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I did not understand.';
+    const reply = d.choices?.[0]?.message?.content || 'Sorry, try again.';
     const m = reply.match(/\(([^)]{3,})\)/);
     const en = reply.replace(/\([^)]+\)/g, '').trim();
     addMsg('ai', en, m ? m[1] : '');
