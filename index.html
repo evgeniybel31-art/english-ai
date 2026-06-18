@@ -571,60 +571,55 @@ function checkStreak() {
 // PRONUNCIATION
 // ═══════════════════════════════════════════════
 let _audio = null;
-let _femaleVoice = null; // кешированный женский голос
+let _femaleVoice = null;
 
-// Предзагружаем женский голос как только браузер их подгрузит
-function _cacheVoice() {
+// Кешируем женский голос при загрузке — iOS грузит голоса асинхронно
+function _loadVoices() {
   const vs = speechSynthesis.getVoices();
   if (!vs.length) return;
   const pref = ['Samantha','Karen','Moira','Tessa','Google UK English Female','Microsoft Zira'];
   _femaleVoice = pref.map(n => vs.find(x => x.name === n)).find(Boolean)
     || vs.find(v => /female/i.test(v.name) && v.lang.startsWith('en'))
-    || vs.find(v => v.lang === 'en-GB')
-    || vs.find(v => v.lang.startsWith('en'));
+    || vs.find(v => v.lang.startsWith('en-'));
 }
-
 if (window.speechSynthesis) {
-  speechSynthesis.onvoiceschanged = _cacheVoice;
-  _cacheVoice();
+  speechSynthesis.onvoiceschanged = _loadVoices;
+  _loadVoices();
 }
 
+// Web Speech — работает всегда, в любом контексте
 function _wsFemale(text) {
   if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.15;
+  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.2;
+  // Если _femaleVoice ещё не загрузился — попробуем ещё раз
+  if (!_femaleVoice) _loadVoices();
   if (_femaleVoice) u.voice = _femaleVoice;
   speechSynthesis.speak(u);
 }
 
-// Попытка воспроизвести через StreamElements Joanna
-// tryEl — попытка 0..n, при ошибке пробуем alt URL, потом Web Speech
-function _tryPlay(clean, tryEl) {
+// StreamElements Joanna — работает только при жесте пользователя (iOS)
+function _joanna(text, onFail) {
   if (_audio) { try{_audio.pause();}catch(e){} _audio = null; }
-  if (tryEl === 0) {
-    const url = `https://api.streamelements.com/kappa/v2/speech?voice=Joanna&text=${encodeURIComponent(clean)}`;
-    _audio = new Audio(url);
-    _audio.onerror = () => _tryPlay(clean, 1);
-    _audio.play().catch(() => _tryPlay(clean, 1));
-  } else if (tryEl === 1) {
-    // Запасной: другой голос StreamElements
-    const url = `https://api.streamelements.com/kappa/v2/speech?voice=Salli&text=${encodeURIComponent(clean)}`;
-    _audio = new Audio(url);
-    _audio.onerror = () => _wsFemale(clean);
-    _audio.play().catch(() => _wsFemale(clean));
-  } else {
-    _wsFemale(clean);
-  }
+  let done = false;
+  const fail = () => { if (!done) { done = true; onFail && onFail(); } };
+  const url = 'https://api.streamelements.com/kappa/v2/speech?voice=Joanna&text=' + encodeURIComponent(text);
+  _audio = new Audio(url);
+  _audio.onerror = fail;
+  _audio.play().catch(fail);
 }
 
+// speak() — вызов с кнопки (жест пользователя): Joanna → Samantha
 function speak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
-  if (window.speechSynthesis) speechSynthesis.cancel();
-  _tryPlay(clean, 0);
+  speechSynthesis.cancel();
+  _joanna(clean, () => _wsFemale(clean));
 }
 
+// autoSpeak() — вызов после ответа ИИ (без жеста): только Web Speech
+// new Audio().play() без жеста iOS блокирует — поэтому только speechSynthesis
 function autoSpeak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
@@ -633,8 +628,7 @@ function autoSpeak(text) {
     const last = btns[btns.length - 1];
     if (last) { last.style.boxShadow = '0 0 0 3px var(--accent)'; setTimeout(() => last.style.boxShadow = '', 2500); }
   }, 300);
-  // Всегда пробуем StreamElements; если нет — кешированный женский голос
-  _tryPlay(clean, 0);
+  _wsFemale(clean);
 }
 
 // ═══════════════════════════════════════════════
