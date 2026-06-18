@@ -568,43 +568,52 @@ function checkStreak() {
 }
 
 // ═══════════════════════════════════════════════
-// PRONUNCIATION — облачный женский голос (Amazon Polly / Joanna)
-// Работает на iOS, Android, любом устройстве
+// PRONUNCIATION — Amazon Polly Joanna (женский)
+// ВАЖНО: speak() должна быть синхронной для iOS
 // ═══════════════════════════════════════════════
 let _audio = null;
 
-async function speak(text) {
+function speak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
 
-  // Останавливаем предыдущее
-  if (_audio) { _audio.pause(); _audio.src=''; _audio = null; }
+  if (_audio) { try{_audio.pause();}catch(e){} _audio = null; }
   if (window.speechSynthesis) speechSynthesis.cancel();
 
-  // Amazon Polly «Joanna» через StreamElements — живой женский голос
+  // Синхронный вызов play() — iOS требует этого в обработчике жеста
   const url = `https://api.streamelements.com/kappa/v2/speech?voice=Joanna&text=${encodeURIComponent(clean)}`;
-  try {
-    _audio = new Audio(url);
-    _audio.volume = 1;
-    await _audio.play();
-  } catch(e) {
-    // Запасной вариант — Web Speech API
-    _fallbackSpeak(clean);
-  }
+  _audio = new Audio(url);
+  _audio.play().catch(() => _wsSpeakFemale(clean));
 }
 
-function _fallbackSpeak(text) {
+// Web Speech API с приоритетом женских голосов (запасной)
+function _wsSpeakFemale(text) {
   if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.15; u.volume = 1;
+  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.15;
   const vs = speechSynthesis.getVoices();
-  const fem = ['Samantha','Karen','Moira','Google UK English Female'];
-  const v = fem.map(n=>vs.find(x=>x.name===n)).find(Boolean)
+  const names = ['Samantha','Karen','Moira','Tessa','Google UK English Female','Microsoft Zira'];
+  const v = names.map(n=>vs.find(x=>x.name===n)).find(Boolean)
+         || vs.find(v=>/female/i.test(v.name) && v.lang.startsWith('en'))
          || vs.find(v=>v.lang==='en-GB')
          || vs.find(v=>v.lang.startsWith('en'));
   if (v) u.voice = v;
   speechSynthesis.speak(u);
+}
+
+// Автоозвучка нового сообщения AI (Web Speech работает без жеста после первого взаимодействия)
+function autoSpeak(text) {
+  const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
+  if (!clean) return;
+  // Пульсируем кнопку чтобы было понятно
+  setTimeout(() => {
+    const btns = document.querySelectorAll('.speak-msg');
+    const last = btns[btns.length - 1];
+    if (last) { last.style.boxShadow = '0 0 0 3px var(--accent)'; setTimeout(()=>last.style.boxShadow='',2000); }
+  }, 200);
+  // Пробуем Web Speech API для автоозвучки
+  _wsSpeakFemale(clean);
 }
 
 // ═══════════════════════════════════════════════
@@ -908,7 +917,7 @@ function initChat() {
   document.getElementById('words-hint').textContent = lw.length
     ? `📚 Вы знаете ${lw.length} слов: ${lw.slice(-6).join(', ')}${lw.length>6?'...':''}`
     : '📚 Сначала пройдите урок!';
-  if (!S.chat.length) { addMsg('ai','Hello! I am Emma. 😊 How are you today?','Привет! Я Эмма. Как дела?'); setTimeout(()=>speak('Hello! I am Emma. How are you today?'),400); }
+  if (!S.chat.length) { addMsg('ai','Hello! I am Emma. 😊 How are you today?','Привет! Я Эмма. Как дела?'); setTimeout(()=>autoSpeak('Hello! I am Emma. How are you today?'),500); }
   else renderChat();
 }
 
@@ -1031,8 +1040,8 @@ RUS: [Russian translation]
     }
 
     addMsg('ai', en, ru);
-    // Автоозвучка нового сообщения
-    setTimeout(() => speak(en.replace(/[^a-zA-Z\s',.!?]/g, '')), 300);
+    // Автоозвучка: autoSpeak использует Web Speech (не блокируется iOS)
+    setTimeout(() => autoSpeak(en), 400);
     S.xp += 5; save();
 
   } catch(e) {
