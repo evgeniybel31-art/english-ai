@@ -568,74 +568,74 @@ function checkStreak() {
 }
 
 // ═══════════════════════════════════════════════
-// PRONUNCIATION
+// PRONUNCIATION  (Web Speech only — работает на iOS без жеста)
 // ═══════════════════════════════════════════════
-let _audio = null;
 let _femaleVoice = null;
+let _voiceInited = false;
 
-// Ищем только женские голоса — НЕ берём первый попавшийся (может быть Alex)
-function _pickFemale(vs) {
+function _findFemale() {
+  const vs = speechSynthesis.getVoices();
+  if (!vs.length) return null;
   const pref = ['Samantha','Karen','Moira','Tessa','Google UK English Female','Microsoft Zira'];
   return pref.map(n => vs.find(x => x.name === n)).find(Boolean)
-    || vs.find(v => /female/i.test(v.name) && v.lang.startsWith('en'))
-    || null; // не берём Alex как fallback!
+      || vs.find(v => /female/i.test(v.name) && v.lang.startsWith('en'))
+      || null;
 }
 
-function _loadVoices() {
-  const vs = speechSynthesis.getVoices();
-  if (!vs.length) return false;
-  _femaleVoice = _pickFemale(vs);
-  return true;
-}
-
-if (window.speechSynthesis) {
-  speechSynthesis.onvoiceschanged = _loadVoices;
-  _loadVoices();
-}
-
-// Говорит женским голосом; если голоса ещё не загружены — ждёт и повторяет
-function _wsFemale(text, attempt) {
-  if (!window.speechSynthesis) return;
-  attempt = attempt || 0;
-
-  // Пытаемся загрузить голос (на iOS может быть не готов сразу)
-  if (!_femaleVoice) _loadVoices();
-
-  if (!_femaleVoice && attempt < 8) {
-    // Голоса ещё не готовы — ждём 150мс и пробуем снова
-    setTimeout(() => _wsFemale(text, attempt + 1), 150);
-    return;
+// Инициализация: iOS загружает голоса только после взаимодействия
+function _initVoices() {
+  if (_voiceInited) return;
+  _voiceInited = true;
+  _femaleVoice = _findFemale();
+  if (!_femaleVoice) {
+    // iOS: голоса ещё не готовы — подписываемся на событие
+    speechSynthesis.onvoiceschanged = () => {
+      _femaleVoice = _findFemale();
+    };
+    // Произносим пустую фразу чтобы iOS загрузил голоса
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0; u.rate = 10;
+    speechSynthesis.speak(u);
+    speechSynthesis.cancel();
+    setTimeout(() => { _femaleVoice = _findFemale(); }, 300);
   }
+}
 
+// Запускаем инициализацию при первом касании
+document.addEventListener('touchstart', _initVoices, { once: true });
+document.addEventListener('click',      _initVoices, { once: true });
+// И сразу при загрузке (для десктопа)
+if (window.speechSynthesis) {
+  speechSynthesis.onvoiceschanged = () => { _femaleVoice = _findFemale(); };
+  _femaleVoice = _findFemale();
+}
+
+// Основная функция воспроизведения
+function _doSpeak(text) {
+  if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.2;
+  u.lang   = 'en-US';
+  u.rate   = 0.85;
+  u.pitch  = 1.15;
   if (_femaleVoice) u.voice = _femaleVoice;
   speechSynthesis.speak(u);
 }
 
-// StreamElements Joanna — только при жесте пользователя (кнопка)
-function _joanna(text, onFail) {
-  if (_audio) { try{_audio.pause();}catch(e){} _audio = null; }
-  let done = false;
-  const fail = () => { if (!done) { done = true; onFail && onFail(); } };
-  const url = 'https://api.streamelements.com/kappa/v2/speech?voice=Joanna&text=' + encodeURIComponent(text);
-  _audio = new Audio(url);
-  _audio.onerror = fail;
-  _audio.play().catch(fail);
-}
-
-// speak() — кнопка "Прослушать": Joanna (Amazon) → Samantha (Web Speech)
+// speak() — кнопки в уроке и "Прослушать" (жест пользователя)
 function speak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
-  // Кешируем голос прямо сейчас — мы в жесте пользователя, голоса доступны
-  if (!_femaleVoice) _loadVoices();
-  speechSynthesis.cancel();
-  _joanna(clean, () => _wsFemale(clean));
+  _initVoices();
+  if (!_femaleVoice) {
+    // Ещё не загружен — подождём 400мс
+    setTimeout(() => { _femaleVoice = _findFemale(); _doSpeak(clean); }, 400);
+  } else {
+    _doSpeak(clean);
+  }
 }
 
-// autoSpeak() — автоозвучка ответа ИИ: только Web Speech с retry
+// autoSpeak() — автоозвучка ответа ИИ
 function autoSpeak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
@@ -644,7 +644,8 @@ function autoSpeak(text) {
     const last = btns[btns.length - 1];
     if (last) { last.style.boxShadow = '0 0 0 3px var(--accent)'; setTimeout(() => last.style.boxShadow = '', 2500); }
   }, 300);
-  _wsFemale(clean);
+  // Даём 600мс чтобы голоса успели загрузиться после Send
+  setTimeout(() => { if (!_femaleVoice) _femaleVoice = _findFemale(); _doSpeak(clean); }, 600);
 }
 
 // ═══════════════════════════════════════════════
@@ -983,8 +984,6 @@ async function sendChat() {
   const txt = inp.value.trim();
   if (!txt) return;
   inp.value=''; inp.style.height='auto';
-  // Кешируем женский голос в момент жеста — на iOS голоса доступны при взаимодействии
-  if (!_femaleVoice && window.speechSynthesis) _loadVoices();
   addMsg('user', txt);
 
   const msgs = document.getElementById('chat-msgs');
