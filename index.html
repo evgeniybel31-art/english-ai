@@ -568,55 +568,43 @@ function checkStreak() {
 }
 
 // ═══════════════════════════════════════════════
-// PRONUNCIATION — женский голос для iOS/Android
+// PRONUNCIATION — облачный женский голос (Amazon Polly / Joanna)
+// Работает на iOS, Android, любом устройстве
 // ═══════════════════════════════════════════════
-// iOS по умолчанию даёт "Alex" (мужской) — явно указываем женский
-const FEMALE_NAMES = [
-  'Samantha','Karen','Moira','Tessa','Victoria','Fiona',
-  'Google UK English Female','Google US English Female',
-  'Microsoft Zira','Microsoft Jenny','Microsoft Eva'
-];
+let _audio = null;
 
-function pickVoice() {
-  const vs = window.speechSynthesis.getVoices();
-  if (!vs.length) return null;
-  for (const name of FEMALE_NAMES) {
-    const v = vs.find(v => v.name === name);
-    if (v) return v;
-  }
-  // Любой голос с "female" в имени на английском
-  const byName = vs.find(v => v.lang.startsWith('en') && /female/i.test(v.name));
-  if (byName) return byName;
-  // en-GB обычно женский по умолчанию
-  const enGB = vs.find(v => v.lang === 'en-GB');
-  if (enGB) return enGB;
-  return vs.find(v => v.lang.startsWith('en-')) || null;
-}
-
-function speak(text) {
-  if (!window.speechSynthesis) return;
-  const clean = text.replace(/[^\w\s',.!?]/g,' ').trim();
+async function speak(text) {
+  const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
 
-  const doSpeak = () => {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(clean);
-    u.lang = 'en-US';
-    u.rate = 0.86;
-    u.pitch = 1.2;   // выше тон — явно женский
-    u.volume = 1;
-    const v = pickVoice();
-    if (v) u.voice = v;
-    speechSynthesis.speak(u);
-  };
+  // Останавливаем предыдущее
+  if (_audio) { _audio.pause(); _audio.src=''; _audio = null; }
+  if (window.speechSynthesis) speechSynthesis.cancel();
 
-  // iOS: голоса могут ещё не загрузиться
-  if (speechSynthesis.getVoices().length) {
-    setTimeout(doSpeak, 50);
-  } else {
-    speechSynthesis.onvoiceschanged = () => { speechSynthesis.onvoiceschanged = null; setTimeout(doSpeak, 50); };
-    speechSynthesis.getVoices(); // триггер загрузки
+  // Amazon Polly «Joanna» через StreamElements — живой женский голос
+  const url = `https://api.streamelements.com/kappa/v2/speech?voice=Joanna&text=${encodeURIComponent(clean)}`;
+  try {
+    _audio = new Audio(url);
+    _audio.volume = 1;
+    await _audio.play();
+  } catch(e) {
+    // Запасной вариант — Web Speech API
+    _fallbackSpeak(clean);
   }
+}
+
+function _fallbackSpeak(text) {
+  if (!window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.15; u.volume = 1;
+  const vs = speechSynthesis.getVoices();
+  const fem = ['Samantha','Karen','Moira','Google UK English Female'];
+  const v = fem.map(n=>vs.find(x=>x.name===n)).find(Boolean)
+         || vs.find(v=>v.lang==='en-GB')
+         || vs.find(v=>v.lang.startsWith('en'));
+  if (v) u.voice = v;
+  speechSynthesis.speak(u);
 }
 
 // ═══════════════════════════════════════════════
