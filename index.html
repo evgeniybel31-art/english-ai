@@ -243,7 +243,10 @@ body {
 }
 .msg.ai { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; align-self: flex-start; }
 .msg.user { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; align-self: flex-end; }
-.msg .trl { font-size: 11px; color: var(--muted); margin-top: 4px; font-style: italic; }
+.msg .trl { font-size: 12px; color: var(--muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); font-style: italic; }
+.msg .msg-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.msg .speak-msg { background: none; border: none; font-size: 16px; cursor: pointer; opacity: .6; padding: 2px; transition: opacity .2s; }
+.msg .speak-msg:active { opacity: 1; }
 
 .chat-row { display: flex; gap: 6px; align-items: flex-end; }
 .chat-in {
@@ -884,7 +887,7 @@ function initChat() {
   document.getElementById('words-hint').textContent = lw.length
     ? `📚 Вы знаете ${lw.length} слов: ${lw.slice(-6).join(', ')}${lw.length>6?'...':''}`
     : '📚 Сначала пройдите урок!';
-  if (!S.chat.length) addMsg('ai','Hello! I am Emma. 😊 How are you today?','Привет! Я Эмма. Как дела?');
+  if (!S.chat.length) { addMsg('ai','Hello! I am Emma. 😊 How are you today?','Привет! Я Эмма. Как дела?'); setTimeout(()=>speak('Hello! I am Emma. How are you today?'),400); }
   else renderChat();
 }
 
@@ -895,12 +898,20 @@ function addMsg(role, text, trl='') {
 function renderChat() {
   const c = document.getElementById('chat-msgs');
   if (!c) return;
-  c.innerHTML = S.chat.map(m=>
-    m.role==='ai'
-      ? `<div class="msg ai">${m.text}${m.trl?`<div class="trl">${m.trl}</div>`:''}</div>`
-      : `<div class="msg user">${m.text}</div>`
-  ).join('');
-  c.scrollTop=c.scrollHeight;
+  c.innerHTML = S.chat.map((m, i) => {
+    if (m.role === 'ai') {
+      const safe = m.text.replace(/'/g, '&#39;');
+      return `<div class="msg ai">
+        <div>${m.text}</div>
+        ${m.trl ? `<div class="trl">🇷🇺 ${m.trl}</div>` : ''}
+        <div class="msg-actions">
+          <button class="speak-msg" onclick="speak('${safe}')" title="Прослушать">🔊 Прослушать</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="msg user">${m.text}</div>`;
+  }).join('');
+  c.scrollTop = c.scrollHeight;
 }
 
 async function sendChat() {
@@ -922,7 +933,9 @@ Student knows these words: ${learned.join(', ') || 'hello, yes, no, please, than
 STRICT RULES:
 - Use ONLY words from the student list + basic grammar (is,are,am,the,a,an,I,you,he,she,it,we,they,my,your,this,that,and,but,not,do,does,can,will,very,in,on,at,to,for,with,of,have,get)
 - Keep sentences SHORT (max 8 words)
-- After your English reply, add Russian translation in parentheses like: Hello! (Привет!)
+- ALWAYS format your reply EXACTLY like this (two lines, no exceptions):
+  ENGLISH: [your English reply here]
+  RUSSIAN: [Russian translation here]
 - Gently correct grammar errors
 - Ask one simple question to keep conversation going
 - Use emojis. Be warm and encouraging.`;
@@ -974,10 +987,16 @@ STRICT RULES:
 
     const d = await res.json();
     const reply = d.choices?.[0]?.message?.content || 'Sorry, try again.';
-    const m = reply.match(/\(([^)]{3,})\)/);
-    const en = reply.replace(/\([^)]+\)/g, '').trim();
-    addMsg('ai', en, m ? m[1] : '');
-    speak(en.replace(/[^a-zA-Z\s',.!?]/g, ''));
+
+    // Parse ENGLISH: / RUSSIAN: format
+    const enMatch = reply.match(/ENGLISH:\s*(.+?)(?:\n|$)/i);
+    const ruMatch = reply.match(/RUSSIAN:\s*(.+?)(?:\n|$)/i);
+    const en = enMatch ? enMatch[1].trim() : reply.replace(/RUSSIAN:.*/is,'').trim();
+    const ru = ruMatch ? ruMatch[1].trim() : '';
+
+    addMsg('ai', en, ru);
+    // Автоозвучка нового сообщения
+    setTimeout(() => speak(en.replace(/[^a-zA-Z\s',.!?]/g, '')), 300);
     S.xp += 5; save();
 
   } catch(e) {
