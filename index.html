@@ -375,14 +375,17 @@ body {
   </div>
   <div id="chat-setup" style="display:none">
     <div class="api-box">
-      <div class="ico">🔑</div>
-      <h3>Нужен API ключ Claude</h3>
-      <p>Введите ваш Anthropic API ключ. Ключ хранится только на этом устройстве в браузере.</p>
-      <input class="api-in" type="password" id="api-inp" placeholder="sk-ant-...">
-      <button class="api-save" onclick="saveKey()">Сохранить и начать →</button>
-      <p style="font-size:11px;color:var(--muted);margin-top:10px">
-        Получить: <a href="https://console.anthropic.com" target="_blank" style="color:var(--accent)">console.anthropic.com</a>
-      </p>
+      <div class="ico">🤖</div>
+      <h3>Бесплатный AI учитель</h3>
+      <p>Используем <strong style="color:var(--green)">Google Gemini</strong> — полностью бесплатно, 1500 сообщений в день. Получите ключ за 1 минуту.</p>
+      <div style="background:var(--card2);border-radius:12px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.7;text-align:left">
+        1. Откройте <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com/app/apikey</a><br>
+        2. Нажмите <b>«Create API key»</b><br>
+        3. Скопируйте ключ и вставьте ниже
+      </div>
+      <input class="api-in" type="password" id="api-inp" placeholder="AIza...">
+      <button class="api-save" onclick="saveKey()">Начать бесплатно →</button>
+      <p style="font-size:11px;color:var(--green);margin-top:10px">✅ Бесплатно • Без карты • 1500 сообщений/день</p>
     </div>
   </div>
   <div id="chat-main" style="display:none">
@@ -912,37 +915,63 @@ async function sendChat() {
   msgs.scrollTop=msgs.scrollHeight;
 
   const learned = S.learned.map(id=>V.find(w=>w.id===id)?.w).filter(Boolean);
-  const sys=`You are Emma, a friendly English teacher for Russian beginners.
-Student knows: ${learned.join(', ')}.
-RULES: Use ONLY words the student knows + basic grammar words (is,are,am,the,a,an,I,you,he,she,it,we,they,my,your,this,that,and,but,not,do,does,can,will,very,in,on,at,to,for,with,of).
-Keep sentences SHORT (max 8 words). After your English reply add Russian translation in parentheses.
-Gently correct errors. Ask simple questions. Use emojis. Be warm and encouraging.`;
 
-  const history = S.chat.slice(-8).map(m=>({role:m.role==='ai'?'assistant':'user',content:m.text}));
+  const sysPrompt = `You are Emma, a friendly English teacher for Russian beginners.
+Student knows these words: ${learned.join(', ') || 'hello, yes, no, please, thank you'}.
+STRICT RULES:
+- Use ONLY words from the student list + basic grammar (is,are,am,the,a,an,I,you,he,she,it,we,they,my,your,this,that,and,but,not,do,does,can,will,very,in,on,at,to,for,with,of,have,get)
+- Keep sentences SHORT (max 8 words)
+- After your English reply, add Russian translation in parentheses like: Hello! (Привет!)
+- Gently correct grammar errors
+- Ask one simple question to keep conversation going
+- Use emojis. Be warm and encouraging.`;
+
+  // Build conversation history for Gemini
+  const history = S.chat.slice(-10).map(m => ({
+    role: m.role === 'ai' ? 'model' : 'user',
+    parts: [{ text: m.text }]
+  }));
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':S.apiKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:200,system:sys,messages:history})
-    });
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${S.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: sysPrompt }] },
+          contents: history,
+          generationConfig: { maxOutputTokens: 200, temperature: 0.7 }
+        })
+      }
+    );
+
     document.getElementById(lid)?.remove();
-    if (!res.ok) { const e=await res.json(); addMsg('ai','⚠️ Ошибка: '+(e.error?.message||'Проверьте ключ')); return; }
-    const d=await res.json();
-    const reply=d.content[0].text;
-    const m=reply.match(/\(([^)]{3,})\)/);
-    const en=reply.replace(/\([^)]+\)/g,'').trim();
-    addMsg('ai',en,m?m[1]:'');
-    speak(en.replace(/[^a-zA-Z\s',.!?]/g,''));
-    S.xp+=5; save();
+
+    if (!res.ok) {
+      const e = await res.json();
+      const msg = e.error?.message || 'Проверьте API ключ';
+      if (msg.includes('API_KEY_INVALID') || res.status === 400) {
+        addMsg('ai', '🔑 Неверный API ключ. Нажмите кнопку ниже и получите новый.');
+        document.getElementById('chat-main').innerHTML +=
+          `<button class="api-save" style="margin-top:10px" onclick="S.apiKey='';save();initChat()">🔄 Сменить ключ</button>`;
+      } else {
+        addMsg('ai', '⚠️ Ошибка: ' + msg);
+      }
+      return;
+    }
+
+    const d = await res.json();
+    const reply = d.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I did not understand.';
+    const m = reply.match(/\(([^)]{3,})\)/);
+    const en = reply.replace(/\([^)]+\)/g, '').trim();
+    addMsg('ai', en, m ? m[1] : '');
+    speak(en.replace(/[^a-zA-Z\s',.!?]/g, ''));
+    S.xp += 5; save();
+
   } catch(e) {
     document.getElementById(lid)?.remove();
-    addMsg('ai','⚠️ Нет соединения с сервером.');
+    addMsg('ai', '⚠️ Нет соединения. Проверьте интернет.');
   }
 }
 
