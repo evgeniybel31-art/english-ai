@@ -133,11 +133,15 @@ body {
   box-shadow: 0 8px 40px rgba(0,0,0,.35);
 }
 .wcard .tag { font-size: 10px; color: var(--accent); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
-.wcard .wimg {
-  width: 100%; height: 170px; object-fit: cover;
-  border-radius: 12px; margin-bottom: 14px;
-  background: var(--card2); display: block;
+.wcard .wimg-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  margin-bottom: 14px;
 }
+.wcard .wimg {
+  width: 100%; height: 120px; object-fit: cover;
+  border-radius: 10px; background: var(--card2); display: block;
+}
+.wcard .wimg:only-child { grid-column: 1/-1; height: 170px; }
 .wcard .emoji-fb { font-size: 72px; line-height: 1; display: none; margin-bottom: 10px; }
 .wcard .word { font-size: 38px; font-weight: 900; letter-spacing: -1.5px; }
 .wcard .ipa { font-size: 15px; color: var(--muted); margin: 3px 0 10px; font-style: italic; }
@@ -610,32 +614,41 @@ if (window.speechSynthesis) {
   _femaleVoice = _findFemale();
 }
 
-// Основная функция воспроизведения
+// Web Speech — запасной, всегда работает
 function _doSpeak(text) {
   if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang   = 'en-US';
-  u.rate   = 0.85;
-  u.pitch  = 1.15;
+  u.lang = 'en-US'; u.rate = 0.85; u.pitch = 1.15;
+  if (!_femaleVoice) _femaleVoice = _findFemale();
   if (_femaleVoice) u.voice = _femaleVoice;
   speechSynthesis.speak(u);
 }
 
-// speak() — кнопки в уроке и "Прослушать" (жест пользователя)
+let _gAudio = null;
+// Google Translate TTS — натуральный женский голос (работает с жестом)
+function _googleTTS(text, fallback) {
+  if (_gAudio) { try{_gAudio.pause();}catch(e){} _gAudio = null; }
+  let done = false;
+  const fail = () => { if (!done) { done = true; fallback && fallback(); } };
+  // Разбиваем длинный текст на части (Google TTS лимит ~200 символов)
+  const chunk = text.slice(0, 180);
+  const url = 'https://translate.google.com/translate_tts?ie=UTF-8&tl=en-US&client=tw-ob&q=' + encodeURIComponent(chunk);
+  _gAudio = new Audio(url);
+  _gAudio.onerror = fail;
+  _gAudio.play().catch(fail);
+}
+
+// speak() — кнопки (жест пользователя): Google TTS → Web Speech Samantha
 function speak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
   _initVoices();
-  if (!_femaleVoice) {
-    // Ещё не загружен — подождём 400мс
-    setTimeout(() => { _femaleVoice = _findFemale(); _doSpeak(clean); }, 400);
-  } else {
-    _doSpeak(clean);
-  }
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  _googleTTS(clean, () => _doSpeak(clean));
 }
 
-// autoSpeak() — автоозвучка ответа ИИ
+// autoSpeak() — автоозвучка ответа ИИ (без жеста): только Web Speech
 function autoSpeak(text) {
   const clean = text.replace(/[^\w\s',.!?]/g,' ').replace(/\s+/g,' ').trim();
   if (!clean) return;
@@ -644,8 +657,7 @@ function autoSpeak(text) {
     const last = btns[btns.length - 1];
     if (last) { last.style.boxShadow = '0 0 0 3px var(--accent)'; setTimeout(() => last.style.boxShadow = '', 2500); }
   }, 300);
-  // Даём 600мс чтобы голоса успели загрузиться после Send
-  setTimeout(() => { if (!_femaleVoice) _femaleVoice = _findFemale(); _doSpeak(clean); }, 600);
+  setTimeout(() => _doSpeak(clean), 300);
 }
 
 // ═══════════════════════════════════════════════
@@ -748,13 +760,26 @@ function stopMic() {
 // ═══════════════════════════════════════════════
 // IMAGES
 // ═══════════════════════════════════════════════
-function imgUrl(q) {
-  return `https://source.unsplash.com/featured/360x180/?${encodeURIComponent(q.split(' ')[0])}`;
+function imgUrl(kw, lock) {
+  return `https://loremflickr.com/400/280/${encodeURIComponent(kw)}?lock=${lock}`;
 }
 function imgHtml(word) {
-  return `<img class="wimg" src="${imgUrl(word.img)}" alt="${word.w}"
-    onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
-  <span class="emoji-fb" style="display:none">${word.e}</span>`;
+  const kws = word.img.split(' ');
+  const k1 = kws[0];
+  const k2 = kws[1] || kws[0];
+  const eid = 'ef' + word.id;
+  return `<div class="wimg-grid" id="wg${word.id}">
+    <img class="wimg" src="${imgUrl(k1, word.id*3)}" alt="${word.w}"
+      onerror="this.style.display='none';_imgFail('${eid}')">
+    <img class="wimg" src="${imgUrl(k2, word.id*7)}" alt="${word.w}"
+      onerror="this.style.display='none';_imgFail('${eid}')">
+  </div>
+  <div id="${eid}" class="emoji-fb" style="display:none">${word.e}</div>`;
+}
+const _ifails={};
+function _imgFail(id){
+  _ifails[id]=(_ifails[id]||0)+1;
+  if(_ifails[id]>=2){ const e=document.getElementById(id); if(e)e.style.display='block'; }
 }
 
 // ═══════════════════════════════════════════════
